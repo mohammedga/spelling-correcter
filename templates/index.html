@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>أداة التصحيح الإملائي العربي</title>
+
+<!-- لا نستخدم style.css الخارجي لتفادي 404 -->
+<style>
+  :root{
+    --bg:#8f8f92; --card:#9b9090; --fg:#abb0bc; --muted:#6b7280;
+    --primary:#2563eb; --primary-2:#1e40af; --ok:#059669; --err:#b00020;
+    --mark:#fff3cd; --mark-b:#ffe69c;
+  }
+  *{box-sizing:border-box}
+  body{font-family:"Segoe UI",Tahoma,Arial,"Noto Naskh Arabic UI",system-ui;
+       margin:0; background:var(--bg); color:var(--fg);background-color:#cdcfd4}
+  .container{max-width:1100px; margin:24px auto; padding:16px}
+  .header{display:flex; align-items:center; gap:12px; margin-bottom:14px}
+  h1{margin:0; font-size:28px; font-weight:800}
+  .status{margin-inline-start:auto; color:var(--muted); font-size:14px}
+  .controls{display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 16px}
+  button{padding:10px 14px; border:none; border-radius:10px; cursor:pointer; font-weight:700}
+  .btn{background:var(--primary); background-color: rgb(159, 162, 167); color:#282828}
+  .btn:hover{background:var(--primary-2);background-color: rgb(123, 127, 134)}
+  .btn-sec{background:#eaecf1; color:#878b97}
+  .btn-ghost{background:#9a9292; border:1px solid #9fa2a7; color:#f4e4e4}
+  .grid{display:grid; grid-template-columns:1fr; gap:14px}
+  @media (min-width:980px){ .grid{grid-template-columns:1fr 1fr} }
+  .card{background:var(--card);background-color: #e5e5e5; color:#282828 ; border:1px solid #eee; border-radius:14px; padding:14px; box-shadow:0 8px 20px rgba(0,0,0,.04)}
+  .card h2{margin:0 0 8px; font-size:18px}
+  
+  
+  textarea {
+      width: 100%;
+      min-height: 260px;
+      font-size: 16px;
+      line-height: 1.8;
+      border: 1px solid #a5abb7;
+      background: #e5e5e5;
+      border-radius: 10px;
+      padding: 12px;
+}
+    
+  .card {
+    background: #cdcfd4;
+    border: 1px solid #eee;
+    border-radius: 14px;
+    padding: 14px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, .04);
+    color: black;
+}
+  .subtle{font-size:13px; color:var(--muted)}
+  .panel{min-height:260px; white-space:pre-wrap; line-height:1.9}
+  mark.hl{background:var(--mark); border-bottom:2px solid var(--mark-b); border-radius:4px; padding:0 2px}
+  .matches{list-style:none; margin:10px 0 0; padding:0; display:flex; flex-direction:column; gap:10px}
+  .match{border:1px solid #918989; border-radius:12px; padding:10px; background:#877f7f63 ; font-size: 17px;}
+  .badges{display:flex; gap:8px; align-items:center; margin:4px 0}
+  .token{font-weight:700}
+  .msg{color:#111}
+  .suggests{display:flex; flex-wrap:wrap; gap:8px; margin-top:8px}
+  .suggests .sugg{background:#10b981; color:#fff}
+  .suggests .sugg:hover{background:#0a8f6b}
+  .muted{color:var(--muted)}
+  .footer{margin-top:10px; text-align:center; font-size:12px; color:var(--muted)}
+  .kbd{border:1px solid #ddd; border-bottom-width:2px; border-radius:6px; padding:2px 6px; font-size:12px; background:#fafafa}
+</style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1 style="color: black;">أداة التصحيح الإملائي </h1>
+      <span id="status" class="status">جاهز</span>
+    </div>
+
+    <div class="controls">
+      <button id="checkBtn" class="btn">فحص <span class="kbd">Ctrl</span>+<span class="kbd">Enter</span></button>
+      <button id="applyAllBtn" class="btn" >طبّق الكل</button>
+      <button id="undoBtn" class="btn">تراجع</button>
+      <button id="copyBtn" class="btn">نسخ النص المصحَّح</button>
+      <span id="charCount" class="subtle"></span>
+    </div>
+
+    <div class="grid" >
+      <div class="card" style="background-color: #e5e5e5">
+        <h2>النص الأصلي</h2>
+        <textarea id="input" placeholder="الصق النص هنا..." style="width: 492px; height: 412px;"></textarea>
+        <div class="subtle">تلميح: يمكنك الضغط <span class="kbd">Ctrl</span>+<span class="kbd">Enter</span> للفحص سريعًا.</div>
+      </div>
+
+      <div class="card" style="background-color: #e5e5e5 ; font: size 50px">
+        <h2>المعاينة</h2>
+        <div id="preview" class="panel subtle" style="font-size: 17px;">— لا نتائج بعد —</div>
+        <ul id="list" class="matches"></ul>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+(() => {
+  const input = document.getElementById('input');
+  const checkBtn = document.getElementById('checkBtn');
+  const applyAllBtn = document.getElementById('applyAllBtn');
+  const undoBtn = document.getElementById('undoBtn');
+  const copyBtn = document.getElementById('copyBtn');
+  const preview = document.getElementById('preview');
+  const list = document.getElementById('list');
+  const statusEl = document.getElementById('status');
+  const charCountEl = document.getElementById('charCount');
+
+  let currentText = '';
+  let matches = []; // {offset,length,message,replacements,applied:false}
+  const undoStack = [];
+
+  const fmt = (n)=> n.toLocaleString('ar-EG');
+  const escapeHtml = s => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  function setStatus(msg, err){
+    statusEl.textContent = msg;
+    statusEl.style.color = err ? '#b00020' : '#6b7280';
+  }
+  function pushUndo(){ undoStack.push(currentText); }
+  function undo(){
+    if (!undoStack.length) return;
+    currentText = undoStack.pop();
+    renderPreview(); renderList(); updateApplyAllState();
+  }
+  function updateCharCount(){ charCountEl.textContent = `${fmt((input.value||'').length)} حرف`; }
+  input.addEventListener('input', updateCharCount); updateCharCount();
+
+  async function checkText(){
+    const text = (input.value||'').trim();
+    if (!text){ setStatus('النص فارغ', true); preview.textContent='—'; list.innerHTML=''; applyAllBtn.disabled=true; return; }
+
+    setStatus('جاري الفحص…');
+    try{
+      const res = await fetch('/check', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({text})
+      });
+      const data = await res.json();
+      if(!res.ok) throw new Error(data.message || data.error || 'فشل الفحص');
+
+      currentText = text;
+      matches = (data.matches||[]).map(m => ({...m, applied:false})).sort((a,b)=>a.offset-b.offset);
+
+      if(!matches.length){
+        preview.innerHTML = `<span class="muted">لا توجد أخطاء مهمة.</span>`;
+        list.innerHTML = '';
+        applyAllBtn.disabled = true;
+        setStatus('تم — لا أخطاء كبيرة');
+      }else{
+        renderPreview();
+        renderList();
+        applyAllBtn.disabled = false;
+        setStatus(`تم — ${fmt(matches.length)} نتائج`);
+      }
+    }catch(e){
+      setStatus(e.message || 'تعذر الفحص', true);
+    }
+  }
+
+  function renderPreview(){
+    if(!currentText){ preview.textContent='—'; return; }
+    if(!matches.length){ preview.textContent = escapeHtml(currentText); return; }
+    // استخدم المطابقات غير المطبقة فقط
+    const active = matches.filter(m=>!m.applied).map(m=>({
+      start: Math.max(0, Math.min(currentText.length, m.offset)),
+      end: Math.max(0, Math.min(currentText.length, m.offset+m.length)),
+      m
+    })).filter(x=>x.end>x.start).sort((a,b)=>a.start-b.start);
+
+    let html = ''; let cursor=0; let lastEnd=-1;
+    for(const seg of active){
+      if(seg.start < lastEnd) continue; // تجاهل المتداخل
+      html += escapeHtml(currentText.slice(cursor, seg.start));
+      const chunk = currentText.slice(seg.start, seg.end);
+      const tip = `${seg.m.message || ''}\nانقر لتطبيق أول اقتراح`;
+      html += `<mark class="hl" title="${escapeHtml(tip)}" data-offset="${seg.m.offset}" data-length="${seg.m.length}">${escapeHtml(chunk)}</mark>`;
+      cursor = seg.end; lastEnd = seg.end;
+    }
+    html += escapeHtml(currentText.slice(cursor));
+    preview.innerHTML = html || escapeHtml(currentText);
+  }
+
+  function contextSnippet(start, end){
+    const pad = 18;
+    const pre = currentText.slice(Math.max(0,start-pad), start);
+    const tok = currentText.slice(start,end);
+    const post = currentText.slice(end, Math.min(currentText.length, end+pad));
+    return `${escapeHtml(pre)}<mark class="hl">${escapeHtml(tok)}</mark>${escapeHtml(post)}`;
+  }
+
+  function renderList(){
+    if(!matches.length){ list.innerHTML=''; return; }
+    list.innerHTML = matches.filter(m=>!m.applied).map((m,idx)=>{
+      const s = m.offset, e = m.offset+m.length;
+      const token = currentText.slice(s,e);
+      const reps = (m.replacements||[]).slice(0,5);
+      const buttons = reps.length ? reps.map(r=>`<button class="sugg" data-idx="${idx}" data-rep="${escapeHtml(r)}">${escapeHtml(r)}</button>`).join('') :
+                                   `<span class="muted">لا اقتراحات</span>`;
+      return `
+        <li class="match">
+          <div class="msg"><span class="token">«${escapeHtml(token)}»</span> — ${escapeHtml(m.message||'تصحيح محتمل')}</div>
+          <div class="subtle">${contextSnippet(s,e)}</div>
+          <div class="suggests">${buttons} <button class="btn-ghost" data-ignore="${idx}">تجاهل</button></div>
+        </li>`;
+    }).join('');
+  }
+
+  function applyReplacement(matchIdx, replacement){
+    const m = matches.filter(x=>!x.applied)[matchIdx];
+    if(!m) return;
+    const start = m.offset, end = m.offset + m.length;
+    pushUndo();
+    const before = currentText.slice(0,start), after = currentText.slice(end);
+    const newStr = String(replacement || currentText.slice(start,end));
+    currentText = before + newStr + after;
+    const diff = newStr.length - (end - start);
+    // علّم كمطبّق واضبط المؤشرات اللاحقة
+    const originalIdx = matches.indexOf(m);
+    matches[originalIdx].applied = true;
+    for(let i=0;i<matches.length;i++){
+      if(i===originalIdx || matches[i].applied) continue;
+      if(matches[i].offset >= end) matches[i].offset += diff;
+      else if(matches[i].offset < end && (matches[i].offset + matches[i].length) > start){
+        matches[i].applied = true; // تداخل
+      }
+    }
+    renderPreview(); renderList(); updateApplyAllState();
+  }
+
+  function updateApplyAllState(){
+    const remaining = matches.filter(m=>!m.applied).length;
+    applyAllBtn.disabled = remaining===0;
+  }
+
+  // Events
+  checkBtn.addEventListener('click', checkText);
+  input.addEventListener('keydown', e=>{
+    if(e.key==='Enter' && (e.ctrlKey||e.metaKey)) checkText();
+  });
+
+  list.addEventListener('click', e=>{
+    const t = e.target;
+    if(t.matches('button.sugg')){
+      const idx = Number(t.getAttribute('data-idx'));
+      const rep = t.getAttribute('data-rep');
+      applyReplacement(idx, rep);
+    }else if(t.hasAttribute('data-ignore')){
+      const idx = Number(t.getAttribute('data-ignore'));
+      const m = matches.filter(x=>!x.applied)[idx];
+      if(!m) return;
+      const originalIdx = matches.indexOf(m);
+      matches[originalIdx].applied = true;
+      renderPreview(); renderList(); updateApplyAllState();
+    }
+  });
+
+  preview.addEventListener('click', e=>{
+    const mk = e.target.closest('mark.hl'); if(!mk) return;
+    const off = Number(mk.getAttribute('data-offset'));
+    const len = Number(mk.getAttribute('data-length'));
+    const idx = matches.filter(m=>!m.applied).findIndex(m=>m.offset===off && m.length===len);
+    if(idx>=0){
+      const rep = (matches.filter(m=>!m.applied)[idx].replacements||[])[0];
+      if(rep) applyReplacement(idx, rep);
+    }
+  });
+
+  applyAllBtn.addEventListener('click', ()=>{
+    // طبّق أول اقتراح لكل نتيجة متبقية
+    const indices = matches.map((_,i)=>i).filter(i=>!matches[i].applied);
+    for(const i of indices){
+      const mi = matches[i];
+      if(mi.applied) continue;
+      const rep = (mi.replacements||[])[0];
+      if(rep){
+        // نحتاج حساب فهرسها بين المتبقّين لحظة التطبيق
+        const idxAmongRemaining = matches.filter(x=>!x.applied).findIndex(x=>x===mi);
+        applyReplacement(idxAmongRemaining, rep);
+      }
+    }
+    updateApplyAllState();
+  });
+
+  undoBtn.addEventListener('click', undo);
+
+  copyBtn.addEventListener('click', async()=>{
+    try{
+      await navigator.clipboard.writeText(currentText || input.value || '');
+      setStatus('تم النسخ ✅');
+    }catch{ setStatus('تعذّر النسخ', true); }
+  });
+})();
+</script>
+</body>
+</html>
