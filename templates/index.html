@@ -63,6 +63,16 @@
     border:1px solid #a5abb7; background:#e5e5e5;
     border-radius:10px; padding:12px; resize:vertical;
   }
+  .floating-logo {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  height: 60px;
+  width: auto;
+  opacity: 0.15;         
+  pointer-events: none;  
+  z-index: 9999;          
+}
 
   .subtle{font-size:13px; color:var(--muted)}
   .panel{min-height:260px; white-space:pre-wrap; line-height:1.9}
@@ -80,7 +90,6 @@
 
   mark.hl{background:var(--mark); border-bottom:2px solid var(--mark-b); border-radius:4px; padding:0 2px}
 
-  /* عدم خروج المحتوى أفقيًا */
   #preview, .matches, pre, code, table { max-width:100%; overflow-x:auto }
   img, video, canvas { max-width:100%; height:auto }
 </style>
@@ -103,7 +112,6 @@
     <div class="grid">
       <div class="card" style="background-color:#e5e5e5">
         <h2>النص الأصلي</h2>
-        <!-- أزلنا العرض/الارتفاع الثابتين -->
         <textarea id="input" placeholder="الصق النص هنا..."></textarea>
         <div class="subtle">تلميح: يمكنك الضغط <span class="kbd">Ctrl</span>+<span class="kbd">Enter</span> للفحص سريعًا.</div>
       </div>
@@ -129,7 +137,7 @@
   const charCountEl = document.getElementById('charCount');
 
   let currentText = '';
-  let matches = []; // {offset,length,message,replacements,applied:false}
+  let matches = [];
   const undoStack = [];
 
   const fmt = (n)=> n.toLocaleString('ar-EG');
@@ -309,5 +317,7 @@
   });
 })();
 </script>
+<img src="my_logo.png" alt="GARADAN Logo" class="floating-logo">
+
 </body>
 </html>
