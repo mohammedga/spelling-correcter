@@ -21,11 +21,12 @@
 
   /* الحاوية الآن لا تتجاوز عرض الشاشة */
   .container{
-    width:100%;
-    max-width:1100px;
-    margin:24px auto;
-    padding:clamp(12px,3vw,16px);
+    width:95%;
+    max-width:1400px; /* كان 1100px فقط */
+    margin:32px auto;
+    padding:clamp(12px,2vw,24px);
   }
+
 
   .header{display:flex; align-items:center; gap:12px; margin-bottom:14px}
   h1{margin:0; font-size:28px; font-weight:800}
@@ -43,8 +44,17 @@
   .controls button{ flex:1 1 140px }
   @media (min-width:640px){ .controls button{ flex:0 0 auto } }
 
-  .grid{display:grid; grid-template-columns:1fr; gap:14px}
-  @media (min-width:980px){ .grid{grid-template-columns:1fr 1fr} }
+  .grid{
+    display:grid;
+    grid-template-columns:1fr; 
+    gap:24px;                   /* توسيع الفجوة قليلاً */
+}
+@media (min-width:900px){
+    .grid{
+        grid-template-columns:1fr 1fr; /* صفّين جنب بعض */
+    }
+}
+
 
   /* دمج تعريف .card مع الحفاظ على ألوانك */
   .card{
