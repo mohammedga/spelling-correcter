@@ -19,7 +19,7 @@ OVERLAP    = int(os.getenv("OVERLAP", 32))       # كان 80
 AR_WORD    = re.compile(r'[\u0621-\u064A]+', re.UNICODE)
 
 # أقواس JSON مُضاعفة حتى لا تكسرها str.format
-PROMPT_TMPL = """أنت مدقق إملائي/نحوي عربي.
+PROMPT_TMPL = """أنت مدقق إملائي/نحوي عربي وانجليزي.
 أعد JSON فقط بهذه البنية الصارمة:
 {{
   "matches": [
