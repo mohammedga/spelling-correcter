@@ -26,28 +26,34 @@ OVERLAP    = int(os.getenv("OVERLAP", 32))       # كان 80
 AR_WORD    = re.compile(r'[\u0621-\u064A]+', re.UNICODE)
 
 # أقواس JSON مُضاعفة حتى لا تكسرها str.format
-PROMPT_TMPL = """أنت مدقق إملائي/نحوي عربي وانجليزي.
-أعد JSON فقط بهذه البنية الصارمة:
-{
+PROMPT_TMPL = """أنت مدقق إملائي/نحوي عربي وإنجليزي.
+أعد استجابة بصيغة JSON نقي فقط (بدون أي تعليقات أو أسطر إضافية أو ```).
+
+{{
   "matches": [
-    {
-      "offset": number,              // موضع بداية الخطأ داخل النص المُعطى بين <<< >>>
-      "length": number,              // طول المقطع الخاطئ
-      "surface": string,             // المقطع الخاطئ كما هو حرفيًا
-      "message": string,
-      "replacements": [string, ...], // حتى 5 اقتراحات
+    {{
+      "offset": 0,
+      "length": 0,
+      "surface": "",
+      "message": "",
+      "replacements": [],
       "rule_id": "GEMINI_25_FLASH_AR"
-    }
+    }}
   ]
-}
-- إن لم توجد أخطاء: {"matches": []}
-- لا تعد نصًا مصححًا كاملًا.
+}}
+
+المطلوب:
+- أعد كائن JSON واحد فيه مصفوفة "matches".
+- إن لم توجد أخطاء: {{"matches":[]}}
+- لا تُدرج نصًا مصححًا كاملًا ولا تضع ```json.
 
 النص:
 <<<
 {snippet}
 >>>
 """
+
+
 
 def build_prompt(snippet: str) -> str:
     return PROMPT_TMPL.format(snippet=snippet)
@@ -69,54 +75,121 @@ def chunk_text_with_overlap(text: str, size: int = CHUNK_SIZE, overlap: int = OV
     return chunks
 
 def _extract_json(raw: str) -> dict:
-    """محاولة مرنة لاستخراج JSON حتى لو النموذج أضاف نصًا زائدًا."""
+    if not raw:
+        return {}
+    s = str(raw)
+
+    # أزل حواجز الكود والتعليقات والفواصل الزائدة
+    s = re.sub(r"^```(?:json)?\s*|\s*```$", "", s.strip(), flags=re.IGNORECASE|re.MULTILINE)
+    s = re.sub(r"//.*?$", "", s, flags=re.MULTILINE)
+    s = re.sub(r"/\*[\s\S]*?\*/", "", s)
+    s = re.sub(r",\s*([}\]])", r"\1", s)
+
+    # 1) حاول مباشرة
     try:
-        return json.loads(raw)
+        return json.loads(s)
     except Exception:
-        m = re.search(r"\{[\s\S]*\}", raw)
-        if m:
+        pass
+
+    # 2) التقط matches[] ولفّها في كائن
+    m = re.search(r'"matches"\s*:\s*(\[[\s\S]*?\])', s)
+    if m:
+        arr = m.group(1)
+        try:
+            return {"matches": json.loads(arr)}
+        except Exception:
+            # جرّب إصلاح مفاتيح غير مقتبسة وأقواس منفردة (تقريبية)
+            fix = re.sub(r"(?<=\{|,)\s*([A-Za-z_]\w*)\s*:", r'"\1":', arr)  # اقتبس المفاتيح
+            fix = re.sub(r"'", r'"', fix)                                  # استبدل ' بـ "
+            fix = re.sub(r",\s*([}\]])", r"\1", fix)                       # شِيل الفواصل الأخيرة
             try:
-                return json.loads(m.group(0))
+                return {"matches": json.loads(fix)}
             except Exception:
                 return {}
-        return {}
+
+    # 3) التقط أول كائن {} إن وُجد
+    m2 = re.search(r"\{[\s\S]*\}", s)
+    if m2:
+        t = m2.group(0)
+        t = re.sub(r"//.*?$", "", t, flags=re.MULTILINE)
+        t = re.sub(r"/\*[\s\S]*?\*/", "", t)
+        t = re.sub(r",\s*([}\]])", r"\1", t)
+        try:
+            return json.loads(t)
+        except Exception:
+            return {}
+
+    return {}
+
+
+
+
 
 def gen_gemini_response(snippet: str) -> str:
-    """ينادي Gemini 2.5 Flash ويُعيد نص JSON خام."""
-    # المحاولة 1: SDK الجديد google-genai
+    """
+    يستدعي Gemini ويُرجع JSON مضبوط حسب مخطط (بدون تعليقات أو زوائد).
+    """
+    prompt = build_prompt(snippet)
+
+    # المحاولة 1: google.generativeai مع response_schema
+    try:
+        import google.generativeai as genai
+        from google.generativeai import types as ggtypes
+
+        genai.configure(api_key=API_KEY)
+        model_name = (os.getenv("MODEL_NAME") or "gemini-1.5-flash").strip()
+
+        schema = ggtypes.Schema(  # مخطط الاستجابة
+            type=ggtypes.Type.OBJECT,
+            properties={
+                "matches": ggtypes.Schema(
+                    type=ggtypes.Type.ARRAY,
+                    items=ggtypes.Schema(
+                        type=ggtypes.Type.OBJECT,
+                        properties={
+                            "offset": ggtypes.Schema(type=ggtypes.Type.INTEGER),
+                            "length": ggtypes.Schema(type=ggtypes.Type.INTEGER),
+                            "surface": ggtypes.Schema(type=ggtypes.Type.STRING),
+                            "message": ggtypes.Schema(type=ggtypes.Type.STRING),
+                            "replacements": ggtypes.Schema(
+                                type=ggtypes.Type.ARRAY,
+                                items=ggtypes.Schema(type=ggtypes.Type.STRING),
+                            ),
+                            "rule_id": ggtypes.Schema(type=ggtypes.Type.STRING),
+                        },
+                        required=["offset","length","surface","message","replacements","rule_id"],
+                    ),
+                ),
+            },
+            required=["matches"],
+        )
+
+        cfg = genai.GenerationConfig(
+            response_mime_type="application/json",
+            response_schema=schema,
+            temperature=0,
+        )
+
+        model = genai.GenerativeModel(model_name)
+        resp = model.generate_content(prompt, generation_config=cfg)
+        return (resp.text or "{}")
+    except Exception as e:
+        print("generativeai(schema) error:", e)
+
+    # المحاولة 2: google.genai كبديل
     try:
         from google import genai
         from google.genai import types
         client = genai.Client(api_key=API_KEY)
-        cfg = types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0,
-            # thinking_config=types.ThinkingConfig(thinking_budget=0),  # اختياري
-        )
-        resp = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=build_prompt(snippet),
-            config=cfg,
-        )
+        model_name = (os.getenv("MODEL_NAME") or "gemini-2.0-flash").strip()
+        cfg = types.GenerateContentConfig(response_mime_type="application/json", temperature=0)
+        resp = client.models.generate_content(model=model_name, contents=prompt, config=cfg)
         return resp.text or "{}"
-    except ModuleNotFoundError:
-        pass
     except Exception as e:
         print("genai(new) error:", e)
-
-    # المحاولة 2: SDK القديم google-generativeai
-    try:
-        import google.generativeai as genai_old
-        genai_old.configure(api_key=API_KEY)
-        model = genai_old.GenerativeModel(MODEL_NAME)
-        resp = model.generate_content(
-            build_prompt(snippet),
-            generation_config={"response_mime_type": "application/json", "temperature": 0}
-        )
-        return getattr(resp, "text", None) or "{}"
-    except Exception as e:
-        print("genai(old) error:", e)
         return "{}"
+
+
 
 def align_matches(snippet: str, raw_matches: list) -> list:
     """
@@ -294,6 +367,42 @@ def track():
     """, (uid,))
     cur.close(); cn.close()
     return jsonify({"ok":True})
+
+@app.get("/diag")
+def diag():
+    """
+    تشخيص سريع: وجود المفتاح، اسم النموذج، وفحص قصير يرجّع matches.
+    لا يطبع المفتاح نفسه.
+    """
+    info = {
+        "env": {
+            "GEMINI_API_KEY_present": bool(API_KEY),
+            "MODEL_NAME": os.getenv("MODEL_NAME", ""),
+        },
+        "libs": {},
+        "probe": {}
+    }
+    try:
+        import google.generativeai as g
+        info["libs"]["google-generativeai"] = getattr(g, "__version__", "unknown")
+    except Exception as e:
+        info["libs"]["google-generativeai"] = f"missing ({e})"
+    try:
+        from google import genai as g2
+        info["libs"]["google-genai"] = getattr(g2, "__version__", "unknown")
+    except Exception as e:
+        info["libs"]["google-genai"] = f"missing ({e})"
+
+    try:
+        sample = "هاذا كتاب جميل"  # متعمد فيه خطأ "هاذا"
+        raw = gen_gemini_response(sample)
+        data = _extract_json(raw)
+        ms = data.get("matches", [])
+        info["probe"] = {"raw_len": len(raw or ""), "matches_len": len(ms)}
+    except Exception as e:
+        info["probe"] = {"error": str(e)}
+
+    return jsonify(info)
 
 
 if __name__ == "__main__":
