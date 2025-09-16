@@ -5,6 +5,13 @@ from flask import Flask, render_template, request, jsonify
 from dotenv import load_dotenv
 load_dotenv()
 
+# ====== NEW: استيراد موصل MySQL ======
+try:
+    import mysql.connector
+except Exception:
+    mysql = None
+# =====================================
+
 app = Flask(__name__)
 
 # ========= المفتاح من ENV وليس من الكود =========
@@ -21,19 +28,19 @@ AR_WORD    = re.compile(r'[\u0621-\u064A]+', re.UNICODE)
 # أقواس JSON مُضاعفة حتى لا تكسرها str.format
 PROMPT_TMPL = """أنت مدقق إملائي/نحوي عربي وانجليزي.
 أعد JSON فقط بهذه البنية الصارمة:
-{{
+{
   "matches": [
-    {{
+    {
       "offset": number,              // موضع بداية الخطأ داخل النص المُعطى بين <<< >>>
       "length": number,              // طول المقطع الخاطئ
       "surface": string,             // المقطع الخاطئ كما هو حرفيًا
       "message": string,
       "replacements": [string, ...], // حتى 5 اقتراحات
       "rule_id": "GEMINI_25_FLASH_AR"
-    }}
+    }
   ]
-}}
-- إن لم توجد أخطاء: {{"matches": []}}
+}
+- إن لم توجد أخطاء: {"matches": []}
 - لا تعد نصًا مصححًا كاملًا.
 
 النص:
@@ -182,6 +189,27 @@ def gemini_check_chunk(snippet: str) -> list:
     raw_matches = data.get("matches", []) if isinstance(data, dict) else []
     return align_matches(snippet, raw_matches)
 
+# ========== NEW: إعداد اتصال MySQL من ENV ==========
+DB_HOST  = os.getenv("DB_HOST", "127.0.0.1")
+DB_USER  = os.getenv("DB_USER", "")
+DB_PASS  = os.getenv("DB_PASSWORD", "")
+DB_NAME  = os.getenv("DB_NAME", "")
+DB_TABLE = os.getenv("DB_TABLE", "users")  # اسم الجدول الذي يحتوي المستخدمين
+
+def get_db():
+    """إرجاع اتصال MySQL أو None لو غير متاح."""
+    if not mysql or not DB_USER or not DB_NAME:
+        return None
+    try:
+        cn = mysql.connector.connect(
+            host=DB_HOST, user=DB_USER, password=DB_PASS, database=DB_NAME, autocommit=True
+        )
+        return cn
+    except Exception as e:
+        print("MySQL connect error:", e)
+        return None
+# ====================================================
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -221,7 +249,32 @@ def check():
     results.sort(key=lambda x: x["offset"])
     return jsonify({"matches": results})
 
+# ========== NEW: مسار عدد المستخدمين ==========
+@app.get("/user-count")
+def user_count():
+    """
+    يرجّع عدد المستخدمين من جدول في MySQL بصيغة:
+    {"count": <int>}
+    لو تعذّر الاتصال أو الاستعلام → يرجّع 0 بهدوء.
+    """
+    cn = get_db()
+    if not cn:
+        return jsonify({"count": 0})
+    try:
+        cur = cn.cursor()
+        tbl = DB_TABLE.replace("`", "")  # تبسيط
+        cur.execute(f"SELECT COUNT(*) FROM `{tbl}`;")
+        (count,) = cur.fetchone() or (0,)
+        cur.close(); cn.close()
+        return jsonify({"count": int(count or 0)})
+    except Exception as e:
+        print("user-count error:", e)
+        try:
+            cn.close()
+        except Exception:
+            pass
+        return jsonify({"count": 0})
+# =================================================
+
 if __name__ == "__main__":
     app.run(debug=True)
-
-
