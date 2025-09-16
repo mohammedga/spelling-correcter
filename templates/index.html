@@ -325,6 +325,70 @@
     }catch{ setStatus('تعذّر النسخ', true); }
   });
 })();
+
+function ensureUID(){
+  try{
+    let uid = localStorage.getItem('uid');
+    if(!uid){
+      uid = ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
+        (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
+      );
+      localStorage.setItem('uid', uid);
+    }
+    return uid;
+  }catch(_){ return String(Date.now())+Math.random().toString(16).slice(2); }
+}
+(async()=>{
+  try{
+    await fetch('/track', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ uid: ensureUID() })
+    });
+  }catch(_){}
+})();
+
+// === Patch: ensure counter exists + style + fetch ===
+(function(){
+  // 1) أنشئ العنصر إن لم يوجد
+  let uCountEl = document.getElementById('uCount');
+  if(!uCountEl){
+    uCountEl = document.createElement('div');
+    uCountEl.id = 'uCount';
+    uCountEl.className = 'stealth-count';
+    uCountEl.textContent = '0';
+    document.body.appendChild(uCountEl);
+  }
+
+  // 2) أضف الستايل إن لم يوجد
+  if(!document.getElementById('stealth-count-style')){
+    const st = document.createElement('style');
+    st.id = 'stealth-count-style';
+    st.textContent = `
+      .stealth-count{
+        position:fixed; bottom:6px; left:50%; transform:translateX(-50%);
+        font-size:12px; color:#000; opacity:.22; user-select:none;
+        pointer-events:none; line-height:1; z-index:10;
+      }`;
+    document.head.appendChild(st);
+  }
+
+  // 3) اجلب العدد
+  async function loadUserCount(){
+    try{
+      const r = await fetch('/user-count', { headers:{'Accept':'application/json'} });
+      if(!r.ok) return;
+      const d = await r.json();
+      if(typeof d.count === 'number'){
+        uCountEl.textContent = d.count.toLocaleString('ar-EG');
+      }
+    }catch(_){/* ignore */}
+  }
+  loadUserCount();
+  // setInterval(loadUserCount, 60000); // اختياري: تحديث كل دقيقة
+})();
+
+
 </script>
 
 </body>

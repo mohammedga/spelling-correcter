@@ -275,6 +275,26 @@ def user_count():
             pass
         return jsonify({"count": 0})
 # =================================================
+@app.post("/track")
+def track():
+    import uuid, mysql.connector, os
+    uid = (request.json or {}).get("uid") or str(uuid.uuid4())
+    cn = mysql.connector.connect(
+        host=os.getenv("DB_HOST","127.0.0.1"),
+        user=os.getenv("DB_USER","root"),
+        password=os.getenv("DB_PASSWORD",""),
+        database=os.getenv("DB_NAME","spelling_correcter"),
+        autocommit=True
+    )
+    cur = cn.cursor()
+    cur.execute(f"""
+      INSERT INTO `{os.getenv('DB_TABLE','users')}` (uid, last_seen)
+      VALUES (%s, NOW())
+      ON DUPLICATE KEY UPDATE last_seen=VALUES(last_seen)
+    """, (uid,))
+    cur.close(); cn.close()
+    return jsonify({"ok":True})
+
 
 if __name__ == "__main__":
     app.run(debug=True)
